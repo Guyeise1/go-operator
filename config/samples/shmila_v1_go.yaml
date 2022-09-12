@@ -1,0 +1,6 @@
+apiVersion: shmila.iaf/v1
+kind: Go
+metadata:
+  name: go-sample
+spec:
+  # TODO(user): Add fields here

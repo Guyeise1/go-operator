@@ -1,0 +1,24 @@
+# permissions for end users to edit goes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: go-editor-role
+rules:
+- apiGroups:
+  - shmila.iaf
+  resources:
+  - goes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - shmila.iaf
+  resources:
+  - goes/status
+  verbs:
+  - get

@@ -1,0 +1,33 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  name: manager-role
+rules:
+- apiGroups:
+  - shmila.iaf
+  resources:
+  - goes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - shmila.iaf
+  resources:
+  - goes/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - shmila.iaf
+  resources:
+  - goes/status
+  verbs:
+  - get
+  - patch
+  - update
