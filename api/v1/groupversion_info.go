@@ -15,8 +15,8 @@ limitations under the License.
 */
 
 // Package v1 contains API Schema definitions for the shmila v1 API group
-//+kubebuilder:object:generate=true
-//+groupName=shmila.iaf
+// +kubebuilder:object:generate=true
+// +groupName=shmila.iaf
 package v1
 
 import (
