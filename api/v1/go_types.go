@@ -29,7 +29,7 @@ type GoSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// +kubebuilder:validation:Required
-        // +kubebuilder:validation:Pattern="^([a-z0-9א-ת]+)(-[a-z0-9א-ת]+)*$"
+	// +kubebuilder:validation:Pattern="^([a-z0-9א-ת]+)(-[a-z0-9א-ת]+)*$"
 	// the shorten name for your link
 	// format must kebab case e.g.: "my-first-go-link"
 	Alias string `json:"alias"`
