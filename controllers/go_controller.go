@@ -21,9 +21,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-
 	"io/ioutil"
+	"net/http"
+	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -42,11 +43,14 @@ type GoReconciler struct {
 	Scheme *runtime.Scheme
 }
 type secretData struct {
-	Alias    string
-	Password string
+	Alias             string
+	Password          string
+	ResourceName      string
+	ResourceNamespace string
 }
 
 var goHostUrl = "http://localhost:14000" // TODO: make this from env
+var secretPrefix = "go-"
 
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes/status,verbs=get;update;patch
@@ -63,10 +67,12 @@ var goHostUrl = "http://localhost:14000" // TODO: make this from env
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.12.2/pkg/reconcile
 func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = log.FromContext(ctx)
+	result := ctrl.Result{}
 
-	fmt.Println("Shmila go operator is reconciling and kicking")
 	cr := shmilav1.Go{}
 	crErr := r.Get(ctx, client.ObjectKey{Name: req.Name, Namespace: req.Namespace}, &cr)
+
+	fmt.Printf("cr is: %s", cr.Spec)
 
 	operatorNs := "go-operator-system"
 	secret := getSecretObject(req.Name, req.Namespace, operatorNs)
@@ -75,20 +81,21 @@ func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 	if errors.IsNotFound(crErr) {
 		fmt.Println("handle delete for " + req.Name)
-		err := handleDelete(r, ctx, &secret)
-		return ctrl.Result{}, err
+		err := handleDelete(r.Client, ctx, &secret)
+		return result, err
 	}
 
 	if errors.IsNotFound(secErr) {
 		fmt.Println("secret " + secret.Name + " Not found, creating...")
-		return ctrl.Result{}, handleCreate(r, ctx, &cr, &secret)
+		return result, handleCreate(r, ctx, &cr, &secret)
 	} else {
-		return ctrl.Result{}, handleUpdate(&cr, &secret)
+		return result, handleUpdate(&cr, &secret)
 	}
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *GoReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	go cleanupLoop(mgr, 1*time.Second)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&shmilav1.Go{}).
 		Complete(r)
@@ -96,8 +103,10 @@ func (r *GoReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 func handleCreate(r *GoReconciler, ctx context.Context, cr *shmilav1.Go, secret *corev1.Secret) error {
 	data := map[string]string{
-		"alias":    cr.Spec.Alias,
-		"password": "hello", // TODO: generate
+		"alias":             cr.Spec.Alias,
+		"password":          "hello", // TODO: generate
+		"resourceName":      cr.Name,
+		"resourceNamespace": cr.Namespace,
 	}
 	secret.StringData = data
 	secret.ResourceVersion = ""
@@ -117,7 +126,7 @@ func handleCreate(r *GoReconciler, ctx context.Context, cr *shmilav1.Go, secret 
 	return nil
 }
 
-func handleDelete(r *GoReconciler, ctx context.Context, secret *corev1.Secret) error {
+func handleDelete(r client.Client, ctx context.Context, secret *corev1.Secret) error {
 	secretData, err := readSecret(secret)
 	if err != nil {
 		fmt.Println(err)
@@ -195,7 +204,7 @@ func getSecretObject(resourceName, namespace, operatorNs string) corev1.Secret {
 			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "go-" + namespace + "-" + resourceName,
+			Name:      secretPrefix + namespace + "-" + resourceName,
 			Namespace: operatorNs,
 		},
 	}
@@ -204,12 +213,60 @@ func getSecretObject(resourceName, namespace, operatorNs string) corev1.Secret {
 func readSecret(secret *corev1.Secret) (*secretData, error) {
 	if secret.StringData != nil {
 		fmt.Println("Reading secret data from StringData")
-		return &secretData{Alias: secret.StringData["alias"], Password: secret.StringData["password"]}, nil
+		return &secretData{
+			Alias:             secret.StringData["alias"],
+			Password:          secret.StringData["password"],
+			ResourceName:      secret.StringData["resourceName"],
+			ResourceNamespace: secret.StringData["resourceNamespace"],
+		}, nil
 	} else {
 		fmt.Println("Reading secret data from Data")
-		aliasBytes := string(secret.Data["alias"])
-		passwordBytes := string(secret.Data["password"])
+		return &secretData{
+			Alias:             string(secret.Data["alias"]),
+			Password:          string(secret.Data["password"]),
+			ResourceName:      string(secret.Data["resourceName"]),
+			ResourceNamespace: string(secret.Data["resourceNamespace"]),
+		}, nil
+	}
+}
 
-		return &secretData{Alias: string(aliasBytes), Password: string(passwordBytes)}, nil
+func cleanupLoop(mgr ctrl.Manager, interval time.Duration) {
+	fmt.Println("Cleanup loop starting")
+	for {
+		cleanup(mgr)
+		time.Sleep(interval)
+	}
+}
+
+func cleanup(mgr ctrl.Manager) {
+	secrets := corev1.SecretList{}
+	if err := mgr.GetClient().List(
+		context.TODO(),
+		&secrets,
+		&client.ListOptions{Namespace: "go-operator-system"},
+	); err != nil {
+		fmt.Println("failed to list secrets")
+		fmt.Println(err)
+		return
+	}
+
+	for _, secret := range secrets.Items {
+		if strings.HasPrefix(secret.Name, secretPrefix) {
+			sd, err := readSecret(&secret)
+			if err != nil {
+				fmt.Printf("failed to read data for secret %s\n", secret.Name)
+			} else {
+				cr := shmilav1.Go{}
+				if err := mgr.GetClient().Get(
+					context.TODO(),
+					client.ObjectKey{
+						Name:      sd.ResourceName,
+						Namespace: sd.ResourceNamespace,
+					},
+					&cr); errors.IsNotFound(err) {
+					handleDelete(mgr.GetClient(), context.TODO(), &secret)
+				}
+			}
+		}
 	}
 }
