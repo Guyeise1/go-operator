@@ -37,7 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	shmilav1 "github.com/Guyeise1/go-operator/api/v1"
-	"github.com/Guyeise1/go-operator/environment"
+	"github.com/Guyeise1/go-operator/libs/environment"
 )
 
 // GoReconciler reconciles a Go object
