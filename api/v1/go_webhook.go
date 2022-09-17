@@ -18,6 +18,8 @@ package v1
 
 import (
 	"fmt"
+	"net/http"
+	"os"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -43,9 +45,17 @@ var _ webhook.Validator = &Go{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
 func (r *Go) ValidateCreate() error {
+	goHost := os.Getenv("GO_API_SERVER")
 	golog.Info("validate create", "name", r.Name)
+	res, err := http.Get(goHost + "/api/v1/links/" + r.Spec.Alias)
 
-	// TODO(user): fill in your validation logic upon object creation.
+	if err != nil {
+		return err
+	} else if res.StatusCode != 404 {
+		return fmt.Errorf("alias " + r.Spec.Alias + " already exists")
+	}
+
+	golog.Info("validate create succeess", "request", goHost+"/api/v1/links/"+r.Spec.Alias, "response", res.StatusCode)
 	return nil
 }
 

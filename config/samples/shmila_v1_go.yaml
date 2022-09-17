@@ -1,6 +1,7 @@
 apiVersion: shmila.iaf/v1
 kind: Go
 metadata:
-  name: go-sample
+  name: nadav-11
 spec:
-  # TODO(user): Add fields here
+    alias: my-alias-aaa
+    url: http://chat/s81231236134228
