@@ -3,4 +3,5 @@ kind: Go
 metadata:
   name: go-sample
 spec:
-  # TODO(user): Add fields here
+    alias: my-alias
+    url: http://my-url.com/aaaaaaa/bbb/ccc
