@@ -19,9 +19,11 @@ package controllers
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -102,10 +104,20 @@ func (r *GoReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+func randomPassword() string {
+	letters := "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	ret := make([]byte, 20)
+	for i := 0; i < len(ret); i++ {
+		num, _ := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
+		ret[i] = letters[num.Int64()]
+	}
+	return string(ret)
+}
+
 func handleCreate(r *GoReconciler, ctx context.Context, cr *shmilav1.Go, secret *corev1.Secret) error {
 	data := map[string]string{
 		"alias":             cr.Spec.Alias,
-		"password":          "hello", // TODO: generate
+		"password":          randomPassword(), // TODO: generate
 		"resourceName":      cr.Name,
 		"resourceNamespace": cr.Namespace,
 	}
