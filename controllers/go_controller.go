@@ -138,10 +138,7 @@ func handleDelete(r client.Client, ctx context.Context, secret *corev1.Secret) e
 	body := map[string]string{"alias": secretData.Alias, "password": secretData.Password}
 	json, _ := json.Marshal(body)
 
-	req, _ := http.NewRequest("DELETE", goHostUrl+"/api/v1/links", bytes.NewBuffer(json))
-	req.Header.Add("content-type", "application/json")
-	client := http.Client{}
-	res, err4 := client.Do(req)
+	res, err4 := http.Post(goHostUrl+"/api/v1/links/delete", "application/json", bytes.NewBuffer(json))
 
 	fmt.Println("executed delete request")
 
