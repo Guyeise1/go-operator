@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	shmilav1 "github.com/Guyeise1/go-operator/api/v1"
+	"github.com/Guyeise1/go-operator/environment"
 )
 
 // GoReconciler reconciles a Go object
@@ -49,8 +50,8 @@ type secretData struct {
 	ResourceNamespace string
 }
 
-var goHostUrl = "http://localhost:14000" // TODO: make this from env
-var secretPrefix = "go-"
+var goHostUrl = environment.Variables.GoApiURL
+var secretPrefix = environment.Variables.SecretPrefix
 
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes/status,verbs=get;update;patch
@@ -74,7 +75,7 @@ func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 	fmt.Printf("cr is: %s", cr.Spec)
 
-	operatorNs := "go-operator-system"
+	operatorNs := environment.Variables.ControllerNamespace
 	secret := getSecretObject(req.Name, req.Namespace, operatorNs)
 
 	secErr := r.Get(ctx, client.ObjectKey{Namespace: secret.Namespace, Name: secret.Name}, &secret)
@@ -243,7 +244,7 @@ func cleanup(mgr ctrl.Manager) {
 	if err := mgr.GetClient().List(
 		context.TODO(),
 		&secrets,
-		&client.ListOptions{Namespace: "go-operator-system"},
+		&client.ListOptions{Namespace: environment.Variables.ControllerNamespace},
 	); err != nil {
 		fmt.Println("failed to list secrets")
 		fmt.Println(err)
