@@ -183,6 +183,7 @@ func handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) error {
 		return fmt.Errorf("internal error")
 	}
 	body := map[string]string{"alias": sd.Alias, "url": cr.Spec.Url, "password": sd.Password}
+	fmt.Println("Updating body is: ", body)
 	json, _ := json.Marshal(body)
 	res, err := http.Post(goHostUrl+"/api/v1/links", "application/json", bytes.NewBuffer(json))
 

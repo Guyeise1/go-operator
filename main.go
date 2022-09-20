@@ -22,17 +22,21 @@ import (
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
+
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	shmilav1 "github.com/Guyeise1/go-operator/api/v1"
 	"github.com/Guyeise1/go-operator/controllers"
+	"github.com/Guyeise1/go-operator/libs/environment"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -65,6 +69,15 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	if environment.Variables.ControllerNamespace == "" {
+		setupLog.Error(nil, "envrionment variable CONTROLLER_NAMESPACE is undefined")
+		os.Exit(1)
+	}
+	if environment.Variables.GoApiURL == "" {
+		setupLog.Error(nil, "envrionment variable GO_API_SERVER is undefined")
+		os.Exit(1)
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		MetricsBindAddress:     metricsAddr,
@@ -72,6 +85,7 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "f1c23fe0.iaf",
+		ClientDisableCacheFor:  []client.Object{&corev1.Secret{}},
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
