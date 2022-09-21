@@ -13,11 +13,18 @@ type EnvironmentVariables struct {
 	CleanIntervalSeconds int
 }
 
-var Variables = EnvironmentVariables{
-	GoApiURL:             getenvOrDie("GO_API_SERVER"),
-	ControllerNamespace:  getenvOrDie("CONTROLLER_NAMESPACE"),
-	SecretPrefix:         getenv("SECRET_PREFIX", "go-"),
-	CleanIntervalSeconds: getenvInt("CLEAN_INTERVAL_SECONDS", 15*60),
+var variables *EnvironmentVariables = nil
+
+func GetVariables() *EnvironmentVariables {
+	if variables == nil {
+		variables = &EnvironmentVariables{
+			GoApiURL:             getenvOrDie("GO_API_SERVER"),
+			ControllerNamespace:  getenvOrDie("CONTROLLER_NAMESPACE"),
+			SecretPrefix:         getenv("SECRET_PREFIX", "go-"),
+			CleanIntervalSeconds: getenvInt("CLEAN_INTERVAL_SECONDS", 15*60),
+		}
+	}
+	return variables
 }
 
 func getenvInt(key string, fallback int) int {

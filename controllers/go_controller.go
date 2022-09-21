@@ -52,8 +52,8 @@ type secretData struct {
 	ResourceNamespace string
 }
 
-var goHostUrl = environment.Variables.GoApiURL
-var secretPrefix = environment.Variables.SecretPrefix
+var goHostUrl = environment.GetVariables().GoApiURL
+var secretPrefix = environment.GetVariables().SecretPrefix
 
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes/status,verbs=get;update;patch
@@ -77,7 +77,7 @@ func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 	fmt.Printf("[INFO - Reconcile] reconciling CR: %s-%s\n", cr.Namespace, cr.Name)
 
-	operatorNs := environment.Variables.ControllerNamespace
+	operatorNs := environment.GetVariables().ControllerNamespace
 	secret := getSecretObject(req.Name, req.Namespace, operatorNs)
 
 	secErr := r.Get(ctx, client.ObjectKey{Namespace: secret.Namespace, Name: secret.Name}, &secret)
@@ -98,7 +98,7 @@ func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *GoReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	go cleanupLoop(mgr, time.Duration(environment.Variables.CleanIntervalSeconds)*time.Second)
+	go cleanupLoop(mgr, time.Duration(environment.GetVariables().CleanIntervalSeconds)*time.Second)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&shmilav1.Go{}).
 		Complete(r)
@@ -115,7 +115,7 @@ func randomPassword() string {
 }
 
 func handleCreate(r *GoReconciler, ctx context.Context, cr *shmilav1.Go, secret *corev1.Secret) error {
-	fmt.Printf("[INFO - handleCreate] starting create process for CR: %s-%s", cr.Namespace, cr.Name)
+	fmt.Printf("[INFO - handleCreate] starting create process for CR: %s-%s\n", cr.Namespace, cr.Name)
 	data := map[string]string{
 		"alias":             cr.Spec.Alias,
 		"password":          randomPassword(),
@@ -141,7 +141,7 @@ func handleCreate(r *GoReconciler, ctx context.Context, cr *shmilav1.Go, secret 
 }
 
 func handleDelete(r client.Client, ctx context.Context, secret *corev1.Secret) error {
-	fmt.Println("[INFO - handleDelete] starting delete process for (secret) ", secret.Name)
+	fmt.Println("[INFO - handleDelete] starting delete process for (secret)", secret.Name)
 	secretData, err := readSecret(secret)
 	if err != nil {
 		fmt.Println(err)
@@ -154,22 +154,22 @@ func handleDelete(r client.Client, ctx context.Context, secret *corev1.Secret) e
 	res, err4 := http.Post(goHostUrl+"/api/v1/go-links/delete", "application/json", bytes.NewBuffer(json))
 
 	if err4 != nil {
-		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s", goHostUrl+"/api/v1/go-links/delete", secretData.Alias)
+		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s\n", goHostUrl+"/api/v1/go-links/delete", secretData.Alias)
 		fmt.Println(err)
 		return fmt.Errorf("internal error - ERR_CODE=159")
 	} else if res.StatusCode/100 != 2 {
-		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s, response status %d", goHostUrl+"/api/v1/go-links/delete", secretData.Alias, res.StatusCode)
+		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s, response status %d\n", goHostUrl+"/api/v1/go-links/delete", secretData.Alias, res.StatusCode)
 		fmt.Println(err)
 		return fmt.Errorf("internal error - ERR_CODE=163")
 	}
 
 	err = r.Delete(ctx, secret)
 	if err != nil {
-		fmt.Println("[ERROR - handleDelete] failed to delete secret ", secret.Name)
+		fmt.Println("[ERROR - handleDelete] failed to delete secret", secret.Name)
 		fmt.Println(err)
 		return fmt.Errorf("internal error - ERR_CODE=175")
 	}
-
+	fmt.Println("[INFO - handleDelete] success deleting (secret)", secret.Name)
 	return nil
 }
 
@@ -182,7 +182,12 @@ func handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) error {
 		fmt.Println(err)
 		return fmt.Errorf("internal error - ERR_CODE=187")
 	}
-	body := map[string]string{"alias": sd.Alias, "url": cr.Spec.Url, "password": sd.Password}
+	body := map[string]string{
+		"alias":        sd.Alias,
+		"url":          cr.Spec.Url,
+		"password":     sd.Password,
+		"passwordHint": "managed by go-operator",
+	}
 	json, _ := json.Marshal(body)
 	res, err := http.Post(goHostUrl+"/api/v1/go-links", "application/json", bytes.NewBuffer(json))
 
@@ -250,11 +255,12 @@ func cleanupLoop(mgr ctrl.Manager, interval time.Duration) {
 }
 
 func cleanup(mgr ctrl.Manager) {
+	fmt.Println("[INFO - cleanup] starting cleanup process")
 	secrets := corev1.SecretList{}
 	if err := mgr.GetClient().List(
 		context.TODO(),
 		&secrets,
-		&client.ListOptions{Namespace: environment.Variables.ControllerNamespace},
+		&client.ListOptions{Namespace: environment.GetVariables().ControllerNamespace},
 	); err != nil {
 		fmt.Println("[ERROR - cleanup] failed to list secrets")
 		fmt.Println(err)
