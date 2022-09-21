@@ -75,7 +75,7 @@ func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	cr := shmilav1.Go{}
 	crErr := r.Get(ctx, client.ObjectKey{Name: req.Name, Namespace: req.Namespace}, &cr)
 
-	fmt.Printf("cr is: %s", cr.Spec)
+	fmt.Printf("[INFO - Reconcile] reconciling CR: %s-%s\n", cr.Namespace, cr.Name)
 
 	operatorNs := environment.Variables.ControllerNamespace
 	secret := getSecretObject(req.Name, req.Namespace, operatorNs)
@@ -83,13 +83,13 @@ func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	secErr := r.Get(ctx, client.ObjectKey{Namespace: secret.Namespace, Name: secret.Name}, &secret)
 
 	if errors.IsNotFound(crErr) {
-		fmt.Println("handle delete for " + req.Name)
+		fmt.Println("[INFO - reconcile] handle delete for " + req.Name)
 		err := handleDelete(r.Client, ctx, &secret)
 		return result, err
 	}
 
 	if errors.IsNotFound(secErr) {
-		fmt.Println("secret " + secret.Name + " Not found, creating...")
+		fmt.Println("[INFO - reconcile] secret " + secret.Name + " Not found, creating...")
 		return result, handleCreate(r, ctx, &cr, &secret)
 	} else {
 		return result, handleUpdate(&cr, &secret)
@@ -98,7 +98,7 @@ func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *GoReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	go cleanupLoop(mgr, 1*time.Second)
+	go cleanupLoop(mgr, time.Duration(environment.Variables.CleanIntervalSeconds)*time.Second)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&shmilav1.Go{}).
 		Complete(r)
@@ -115,9 +115,10 @@ func randomPassword() string {
 }
 
 func handleCreate(r *GoReconciler, ctx context.Context, cr *shmilav1.Go, secret *corev1.Secret) error {
+	fmt.Printf("[INFO - handleCreate] starting create process for CR: %s-%s", cr.Namespace, cr.Name)
 	data := map[string]string{
 		"alias":             cr.Spec.Alias,
-		"password":          randomPassword(), // TODO: generate
+		"password":          randomPassword(),
 		"resourceName":      cr.Name,
 		"resourceNamespace": cr.Namespace,
 	}
@@ -125,87 +126,86 @@ func handleCreate(r *GoReconciler, ctx context.Context, cr *shmilav1.Go, secret 
 	secret.ResourceVersion = ""
 	err1 := r.Create(ctx, secret)
 	if err1 != nil {
-		fmt.Println("failed to create secret")
+		fmt.Println("[ERROR - handleCreate] failed to create secret", secret.Name)
 		fmt.Println(err1)
-		return fmt.Errorf("internal error")
+		return fmt.Errorf("internal error - ERR_CODE=131")
 	}
 
 	err2 := handleUpdate(cr, secret)
 	if err2 != nil {
 		fmt.Println(err2)
-		return fmt.Errorf("internal error")
+		return fmt.Errorf("internal error - ERR_CODE=137")
 	}
 
 	return nil
 }
 
 func handleDelete(r client.Client, ctx context.Context, secret *corev1.Secret) error {
+	fmt.Println("[INFO - handleDelete] starting delete process for (secret) ", secret.Name)
 	secretData, err := readSecret(secret)
 	if err != nil {
 		fmt.Println(err)
-		return fmt.Errorf("internal error")
+		return fmt.Errorf("internal error - ERR_CODE=148")
 	}
 
-	fmt.Printf("body: %s\n", secretData)
 	body := map[string]string{"alias": secretData.Alias, "password": secretData.Password}
 	json, _ := json.Marshal(body)
 
 	res, err4 := http.Post(goHostUrl+"/api/v1/links/delete", "application/json", bytes.NewBuffer(json))
 
-	fmt.Println("executed delete request")
-
 	if err4 != nil {
-		fmt.Println("Failed to delete !")
+		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s", goHostUrl+"/api/v1/links/delete", secretData.Alias)
 		fmt.Println(err)
-		return fmt.Errorf("internal error")
-	}
-
-	// password is wrong
-	if res.StatusCode/100 == 4 {
-		fmt.Println("password is incorrect")
-		return fmt.Errorf("internal error")
+		return fmt.Errorf("internal error - ERR_CODE=159")
+	} else if res.StatusCode/100 != 2 {
+		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s, response status %d", goHostUrl+"/api/v1/links/delete", secretData.Alias, res.StatusCode)
+		fmt.Println(err)
+		return fmt.Errorf("internal error - ERR_CODE=163")
 	}
 
 	err = r.Delete(ctx, secret)
 	if err != nil {
+		fmt.Println("[ERROR - handleDelete] failed to delete secret ", secret.Name)
 		fmt.Println(err)
-		return err
+		return fmt.Errorf("internal error - ERR_CODE=175")
 	}
 
 	return nil
 }
 
 func handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) error {
+	fmt.Printf("[INFO - handleUpdate] starting updating process for %s-%s\n", cr.Name, cr.Namespace)
 	sd, err := readSecret(secret)
 
 	if err != nil {
+		fmt.Println("[ERROR - handleUpdate] error reading secret " + secret.Name)
 		fmt.Println(err)
-		return fmt.Errorf("internal error")
+		return fmt.Errorf("internal error - ERR_CODE=187")
 	}
 	body := map[string]string{"alias": sd.Alias, "url": cr.Spec.Url, "password": sd.Password}
-	fmt.Println("Updating body is: ", body)
 	json, _ := json.Marshal(body)
 	res, err := http.Post(goHostUrl+"/api/v1/links", "application/json", bytes.NewBuffer(json))
 
 	if err != nil {
+		fmt.Println("[ERROR - handleUpdate] error in post " + goHostUrl)
 		fmt.Println(err)
-		return fmt.Errorf("internal error")
+		return fmt.Errorf("internal error - ERR_CODE=196")
+	} else {
+		fmt.Println("[INFO - handleUpdate] success posting link ", sd.Alias)
 	}
 
 	defer res.Body.Close()
 
 	if res.StatusCode/100 != 2 {
-		fmt.Printf("bad status code for update request %d\n", res.StatusCode)
+		fmt.Printf("[ERROR - handleUpdate] bad status code for update request for link %s the status is: %d\n", sd.Alias, res.StatusCode)
 		b, err2 := ioutil.ReadAll(res.Body)
 		if err2 == nil {
 			fmt.Println(string(b))
 		}
-		fmt.Printf("response body is ")
-		return fmt.Errorf("internal error")
+		return fmt.Errorf("internal error - ERR_CODE=209")
 	}
 
 	return nil
-
 }
 
 func getSecretObject(resourceName, namespace, operatorNs string) corev1.Secret {
@@ -223,26 +223,26 @@ func getSecretObject(resourceName, namespace, operatorNs string) corev1.Secret {
 
 func readSecret(secret *corev1.Secret) (*secretData, error) {
 	if secret.StringData != nil {
-		fmt.Println("Reading secret data from StringData")
 		return &secretData{
 			Alias:             secret.StringData["alias"],
 			Password:          secret.StringData["password"],
 			ResourceName:      secret.StringData["resourceName"],
 			ResourceNamespace: secret.StringData["resourceNamespace"],
 		}, nil
-	} else {
-		fmt.Println("Reading secret data from Data")
+	} else if secret.Data != nil {
 		return &secretData{
 			Alias:             string(secret.Data["alias"]),
 			Password:          string(secret.Data["password"]),
 			ResourceName:      string(secret.Data["resourceName"]),
 			ResourceNamespace: string(secret.Data["resourceNamespace"]),
 		}, nil
+	} else {
+		return nil, fmt.Errorf("both Data and StringData are nil in secret " + secret.Name)
 	}
 }
 
 func cleanupLoop(mgr ctrl.Manager, interval time.Duration) {
-	fmt.Println("Cleanup loop starting")
+	fmt.Println("[INFO - cleanupLoop] starting cleanup loop")
 	for {
 		cleanup(mgr)
 		time.Sleep(interval)
@@ -256,7 +256,7 @@ func cleanup(mgr ctrl.Manager) {
 		&secrets,
 		&client.ListOptions{Namespace: environment.Variables.ControllerNamespace},
 	); err != nil {
-		fmt.Println("failed to list secrets")
+		fmt.Println("[ERROR - cleanup] failed to list secrets")
 		fmt.Println(err)
 		return
 	}
@@ -265,7 +265,8 @@ func cleanup(mgr ctrl.Manager) {
 		if strings.HasPrefix(secret.Name, secretPrefix) {
 			sd, err := readSecret(&secret)
 			if err != nil {
-				fmt.Printf("failed to read data for secret %s\n", secret.Name)
+				fmt.Println("[ERROR - cleanup] failed to read data from secret ", secret)
+				fmt.Println(err)
 			} else {
 				cr := shmilav1.Go{}
 				if err := mgr.GetClient().Get(

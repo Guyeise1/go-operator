@@ -36,7 +36,6 @@ import (
 
 	shmilav1 "github.com/Guyeise1/go-operator/api/v1"
 	"github.com/Guyeise1/go-operator/controllers"
-	"github.com/Guyeise1/go-operator/libs/environment"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -64,19 +63,11 @@ func main() {
 	opts := zap.Options{
 		Development: true,
 	}
+
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
-
-	if environment.Variables.ControllerNamespace == "" {
-		setupLog.Error(nil, "envrionment variable CONTROLLER_NAMESPACE is undefined")
-		os.Exit(1)
-	}
-	if environment.Variables.GoApiURL == "" {
-		setupLog.Error(nil, "envrionment variable GO_API_SERVER is undefined")
-		os.Exit(1)
-	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
