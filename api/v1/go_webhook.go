@@ -47,7 +47,7 @@ var _ webhook.Validator = &Go{}
 func (r *Go) ValidateCreate() error {
 	goHost := os.Getenv("GO_API_SERVER")
 	golog.Info("validate create", "name", r.Name)
-	res, err := http.Get(goHost + "/api/v1/links/" + r.Spec.Alias)
+	res, err := http.Get(goHost + "/api/v1/go-links/" + r.Spec.Alias)
 
 	if err != nil {
 		return err
@@ -55,7 +55,7 @@ func (r *Go) ValidateCreate() error {
 		return fmt.Errorf("alias " + r.Spec.Alias + " already exists")
 	}
 
-	golog.Info("validate create succeess", "request", goHost+"/api/v1/links/"+r.Spec.Alias, "response", res.StatusCode)
+	golog.Info("validate create succeess", "request", goHost+"/api/v1/go-links/"+r.Spec.Alias, "response", res.StatusCode)
 	return nil
 }
 

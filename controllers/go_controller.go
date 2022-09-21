@@ -151,14 +151,14 @@ func handleDelete(r client.Client, ctx context.Context, secret *corev1.Secret) e
 	body := map[string]string{"alias": secretData.Alias, "password": secretData.Password}
 	json, _ := json.Marshal(body)
 
-	res, err4 := http.Post(goHostUrl+"/api/v1/links/delete", "application/json", bytes.NewBuffer(json))
+	res, err4 := http.Post(goHostUrl+"/api/v1/go-links/delete", "application/json", bytes.NewBuffer(json))
 
 	if err4 != nil {
-		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s", goHostUrl+"/api/v1/links/delete", secretData.Alias)
+		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s", goHostUrl+"/api/v1/go-links/delete", secretData.Alias)
 		fmt.Println(err)
 		return fmt.Errorf("internal error - ERR_CODE=159")
 	} else if res.StatusCode/100 != 2 {
-		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s, response status %d", goHostUrl+"/api/v1/links/delete", secretData.Alias, res.StatusCode)
+		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s, response status %d", goHostUrl+"/api/v1/go-links/delete", secretData.Alias, res.StatusCode)
 		fmt.Println(err)
 		return fmt.Errorf("internal error - ERR_CODE=163")
 	}
@@ -184,7 +184,7 @@ func handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) error {
 	}
 	body := map[string]string{"alias": sd.Alias, "url": cr.Spec.Url, "password": sd.Password}
 	json, _ := json.Marshal(body)
-	res, err := http.Post(goHostUrl+"/api/v1/links", "application/json", bytes.NewBuffer(json))
+	res, err := http.Post(goHostUrl+"/api/v1/go-links", "application/json", bytes.NewBuffer(json))
 
 	if err != nil {
 		fmt.Println("[ERROR - handleUpdate] error in post " + goHostUrl)
