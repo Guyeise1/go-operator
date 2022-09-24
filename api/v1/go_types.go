@@ -42,8 +42,10 @@ type GoSpec struct {
 
 // Status of your GoLink
 type GoStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// +kubebuilder:validation:Optional
+	Message string `json:"message"`
+	// +kubebuilder:validation:Optional
+	State string `json:"state"`
 }
 
 //+kubebuilder:object:root=true

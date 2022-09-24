@@ -35,6 +35,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	shmilav1 "github.com/Guyeise1/go-operator/api/v1"
 	"github.com/Guyeise1/go-operator/libs/environment"
@@ -54,6 +55,8 @@ type secretData struct {
 
 var goHostUrl = environment.GetVariables().GoApiURL
 var secretPrefix = environment.GetVariables().SecretPrefix
+var complete = ctrl.Result{}
+var retry = ctrl.Result{RequeueAfter: 30 * time.Second}
 
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes/status,verbs=get;update;patch
@@ -73,7 +76,15 @@ func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	result := ctrl.Result{}
 
 	cr := shmilav1.Go{}
+
 	crErr := r.Get(ctx, client.ObjectKey{Name: req.Name, Namespace: req.Namespace}, &cr)
+
+	cr.Status = shmilav1.GoStatus{
+		State:   "suceess",
+		Message: "go/" + cr.Spec.Alias + " -> " + cr.Spec.Url,
+	}
+
+	defer r.Status().Update(ctx, &cr)
 
 	fmt.Printf("[INFO - Reconcile] reconciling CR: %s-%s\n", cr.Namespace, cr.Name)
 
@@ -90,9 +101,9 @@ func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 	if errors.IsNotFound(secErr) {
 		fmt.Println("[INFO - reconcile] secret " + secret.Name + " Not found, creating...")
-		return result, handleCreate(r, ctx, &cr, &secret)
+		return r.handleCreate(ctx, &cr, &secret)
 	} else {
-		return result, handleUpdate(&cr, &secret)
+		return r.handleUpdate(&cr, &secret)
 	}
 }
 
@@ -101,12 +112,13 @@ func (r *GoReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	go cleanupLoop(mgr, time.Duration(environment.GetVariables().CleanIntervalSeconds)*time.Second)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&shmilav1.Go{}).
+		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Complete(r)
 }
 
 func randomPassword() string {
 	letters := "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-	ret := make([]byte, 20)
+	ret := make([]byte, 50)
 	for i := 0; i < len(ret); i++ {
 		num, _ := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
 		ret[i] = letters[num.Int64()]
@@ -114,7 +126,7 @@ func randomPassword() string {
 	return string(ret)
 }
 
-func handleCreate(r *GoReconciler, ctx context.Context, cr *shmilav1.Go, secret *corev1.Secret) error {
+func (r *GoReconciler) handleCreate(ctx context.Context, cr *shmilav1.Go, secret *corev1.Secret) (ctrl.Result, error) {
 	fmt.Printf("[INFO - handleCreate] starting create process for CR: %s-%s\n", cr.Namespace, cr.Name)
 	data := map[string]string{
 		"alias":             cr.Spec.Alias,
@@ -128,16 +140,9 @@ func handleCreate(r *GoReconciler, ctx context.Context, cr *shmilav1.Go, secret 
 	if err1 != nil {
 		fmt.Println("[ERROR - handleCreate] failed to create secret", secret.Name)
 		fmt.Println(err1)
-		return fmt.Errorf("internal error - ERR_CODE=131")
+		return retry, fmt.Errorf("internal error - ERR_CODE=131")
 	}
-
-	err2 := handleUpdate(cr, secret)
-	if err2 != nil {
-		fmt.Println(err2)
-		return fmt.Errorf("internal error - ERR_CODE=137")
-	}
-
-	return nil
+	return r.handleUpdate(cr, secret)
 }
 
 func handleDelete(r client.Client, ctx context.Context, secret *corev1.Secret) error {
@@ -157,7 +162,7 @@ func handleDelete(r client.Client, ctx context.Context, secret *corev1.Secret) e
 		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s\n", goHostUrl+"/api/v1/go-links/delete", secretData.Alias)
 		fmt.Println(err)
 		return fmt.Errorf("internal error - ERR_CODE=159")
-	} else if res.StatusCode/100 != 2 {
+	} else if res.StatusCode/100 != 2 && res.StatusCode != 404 {
 		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s, response status %d\n", goHostUrl+"/api/v1/go-links/delete", secretData.Alias, res.StatusCode)
 		fmt.Println(err)
 		return fmt.Errorf("internal error - ERR_CODE=163")
@@ -173,14 +178,14 @@ func handleDelete(r client.Client, ctx context.Context, secret *corev1.Secret) e
 	return nil
 }
 
-func handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) error {
+func (r *GoReconciler) handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) (ctrl.Result, error) {
 	fmt.Printf("[INFO - handleUpdate] starting updating process for %s-%s\n", cr.Name, cr.Namespace)
 	sd, err := readSecret(secret)
 
 	if err != nil {
 		fmt.Println("[ERROR - handleUpdate] error reading secret " + secret.Name)
 		fmt.Println(err)
-		return fmt.Errorf("internal error - ERR_CODE=187")
+		return retry, fmt.Errorf("internal error - ERR_CODE=187")
 	}
 	body := map[string]string{
 		"alias":        sd.Alias,
@@ -194,12 +199,21 @@ func handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) error {
 	if err != nil {
 		fmt.Println("[ERROR - handleUpdate] error in post " + goHostUrl)
 		fmt.Println(err)
-		return fmt.Errorf("internal error - ERR_CODE=196")
+		return retry, fmt.Errorf("internal error - ERR_CODE=196")
 	} else {
 		fmt.Println("[INFO - handleUpdate] success posting link ", sd.Alias)
 	}
 
 	defer res.Body.Close()
+
+	if res.StatusCode == 403 || res.StatusCode == 401 {
+		fmt.Println("[WARN - handleUpdate] link already exists")
+		cr.Status = shmilav1.GoStatus{
+			Message: "alias " + cr.Spec.Alias + " already taken",
+			State:   "error",
+		}
+		return retry, nil
+	}
 
 	if res.StatusCode/100 != 2 {
 		fmt.Printf("[ERROR - handleUpdate] bad status code for update request for link %s the status is: %d\n", sd.Alias, res.StatusCode)
@@ -207,10 +221,10 @@ func handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) error {
 		if err2 == nil {
 			fmt.Println(string(b))
 		}
-		return fmt.Errorf("internal error - ERR_CODE=209")
+		return retry, fmt.Errorf("internal error - ERR_CODE=209")
 	}
 
-	return nil
+	return complete, nil
 }
 
 func getSecretObject(resourceName, namespace, operatorNs string) corev1.Secret {
