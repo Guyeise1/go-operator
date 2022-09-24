@@ -13,4 +13,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: guyeise5/go-operator
-  newTag: 2.0.17
+  newTag: 2.0.19

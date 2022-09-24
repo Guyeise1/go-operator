@@ -1,7 +1,7 @@
 apiVersion: shmila.iaf/v1
 kind: Go
 metadata:
-  name: guy-2
+  name: guy
 spec:
     alias: guy
-    url: http://chat/guy2
+    url: http://chat/guy

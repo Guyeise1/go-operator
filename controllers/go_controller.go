@@ -58,6 +58,10 @@ var secretPrefix = environment.GetVariables().SecretPrefix
 var complete = ctrl.Result{}
 var retry = ctrl.Result{RequeueAfter: time.Duration(environment.GetVariables().RetryTimeSeconds) * time.Second}
 
+var httpClient = http.Client{
+	Timeout: time.Duration(environment.GetVariables().HttpRequestTimeoutSeconds) * time.Second,
+}
+
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes/finalizers,verbs=update
@@ -154,7 +158,7 @@ func handleDelete(r client.Client, ctx context.Context, secret *corev1.Secret) e
 	body := map[string]string{"alias": secretData.Alias, "password": secretData.Password}
 	json, _ := json.Marshal(body)
 
-	res, err4 := http.Post(goHostUrl+"/api/v1/go-links/delete", "application/json", bytes.NewBuffer(json))
+	res, err4 := httpClient.Post(goHostUrl+"/api/v1/go-links/delete", "application/json", bytes.NewBuffer(json))
 
 	if err4 != nil {
 		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s\n", goHostUrl+"/api/v1/go-links/delete", secretData.Alias)
@@ -193,7 +197,7 @@ func (r *GoReconciler) handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) (ctr
 		"passwordHint": "managed by go-operator",
 	}
 	json, _ := json.Marshal(body)
-	res, err := http.Post(goHostUrl+"/api/v1/go-links", "application/json", bytes.NewBuffer(json))
+	res, err := httpClient.Post(goHostUrl+"/api/v1/go-links", "application/json", bytes.NewBuffer(json))
 
 	if err != nil {
 		fmt.Println("[ERROR - handleUpdate] error in post " + goHostUrl)

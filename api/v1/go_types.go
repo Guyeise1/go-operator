@@ -56,6 +56,7 @@ type GoStatus struct {
 //+kubebuilder:printcolumn:name="URL",type="string",JSONPath=".spec.url",description="The URL"
 //+kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.state"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+//+kubebuilder:printcolumn:name="Message",type="string",priority=1,JSONPath=".status.message"
 
 // Go is the Schema for the goes API
 type Go struct {
