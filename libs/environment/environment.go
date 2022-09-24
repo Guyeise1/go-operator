@@ -11,6 +11,7 @@ type EnvironmentVariables struct {
 	ControllerNamespace  string
 	SecretPrefix         string
 	CleanIntervalSeconds int
+	Password             string
 }
 
 var variables *EnvironmentVariables = nil
@@ -22,6 +23,7 @@ func GetVariables() *EnvironmentVariables {
 			ControllerNamespace:  getenvOrDie("CONTROLLER_NAMESPACE"),
 			SecretPrefix:         getenv("SECRET_PREFIX", "go-"),
 			CleanIntervalSeconds: getenvInt("CLEAN_INTERVAL_SECONDS", 15*60),
+			Password:             getenvOrDie("PASSWORD"),
 		}
 	}
 	return variables
@@ -53,8 +55,7 @@ func getenv(key, fallback string) string {
 func getenvOrDie(key string) string {
 	value := os.Getenv(key)
 	if len(value) == 0 {
-		fmt.Println("Environment variable " + key + "is not defined")
-		os.Exit(1)
+		panic("Environment variable " + key + "is not defined")
 	}
 	return value
 }

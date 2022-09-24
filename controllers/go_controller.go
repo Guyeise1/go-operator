@@ -19,22 +19,18 @@ package controllers
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"math/big"
 	"net/http"
-	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	shmilav1 "github.com/Guyeise1/go-operator/api/v1"
 	"github.com/Guyeise1/go-operator/libs/environment"
@@ -45,15 +41,12 @@ type GoReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
-type secretData struct {
-	Alias             string
-	Password          string
-	ResourceName      string
-	ResourceNamespace string
-}
+
+const (
+	cleanApiFinalizer = "clean.api.finalizer"
+)
 
 var goHostUrl = environment.GetVariables().GoApiURL
-var secretPrefix = environment.GetVariables().SecretPrefix
 
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes/status,verbs=get;update;patch
@@ -69,222 +62,103 @@ var secretPrefix = environment.GetVariables().SecretPrefix
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.12.2/pkg/reconcile
 func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
-	result := ctrl.Result{}
-
 	cr := shmilav1.Go{}
-	crErr := r.Get(ctx, client.ObjectKey{Name: req.Name, Namespace: req.Namespace}, &cr)
-
-	fmt.Printf("[INFO - Reconcile] reconciling CR: %s-%s\n", cr.Namespace, cr.Name)
-
-	operatorNs := environment.GetVariables().ControllerNamespace
-	secret := getSecretObject(req.Name, req.Namespace, operatorNs)
-
-	secErr := r.Get(ctx, client.ObjectKey{Namespace: secret.Namespace, Name: secret.Name}, &secret)
-
-	if errors.IsNotFound(crErr) {
-		fmt.Println("[INFO - reconcile] handle delete for " + req.Name)
-		err := handleDelete(r.Client, ctx, &secret)
-		return result, err
+	retry := reconcile.Result{RequeueAfter: 120 * time.Second}
+	complete := reconcile.Result{}
+	err := r.Get(ctx, req.NamespacedName, &cr)
+	if errors.IsNotFound(err) {
+		return complete, nil
+	} else if err != nil {
+		return retry, err
 	}
 
-	if errors.IsNotFound(secErr) {
-		fmt.Println("[INFO - reconcile] secret " + secret.Name + " Not found, creating...")
-		return result, handleCreate(r, ctx, &cr, &secret)
+	if !cr.DeletionTimestamp.IsZero() {
+		err = r.CleanupGo(ctx, &cr, req)
+		if err != nil {
+			return retry, err
+		} else {
+			return complete, nil
+		}
 	} else {
-		return result, handleUpdate(&cr, &secret)
+		if !controllerutil.ContainsFinalizer(&cr, cleanApiFinalizer) {
+			controllerutil.AddFinalizer(&cr, cleanApiFinalizer)
+			// On complete, this will retrigger the loop, therefore must return.
+			err = r.Update(ctx, &cr)
+			if err != nil {
+				return retry, err
+			} else {
+				return complete, nil
+			}
+		} else {
+			err = PersistInGoAPI(ctx, &cr)
+			if err != nil {
+				return retry, err
+			} else {
+				return complete, nil
+			}
+		}
 	}
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *GoReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	go cleanupLoop(mgr, time.Duration(environment.GetVariables().CleanIntervalSeconds)*time.Second)
+	// go cleanupLoop(mgr, time.Duration(environment.GetVariables().CleanIntervalSeconds)*time.Second)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&shmilav1.Go{}).
 		Complete(r)
 }
 
-func randomPassword() string {
-	letters := "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-	ret := make([]byte, 20)
-	for i := 0; i < len(ret); i++ {
-		num, _ := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
-		ret[i] = letters[num.Int64()]
+func (r *GoReconciler) CleanupGo(ctx context.Context, cr *shmilav1.Go, req ctrl.Request) error {
+	m := map[string]string{
+		"alias":    cr.Spec.Alias,
+		"password": environment.GetVariables().Password,
 	}
-	return string(ret)
-}
-
-func handleCreate(r *GoReconciler, ctx context.Context, cr *shmilav1.Go, secret *corev1.Secret) error {
-	fmt.Printf("[INFO - handleCreate] starting create process for CR: %s-%s\n", cr.Namespace, cr.Name)
-	data := map[string]string{
-		"alias":             cr.Spec.Alias,
-		"password":          randomPassword(),
-		"resourceName":      cr.Name,
-		"resourceNamespace": cr.Namespace,
+	json, _ := json.Marshal(m)
+	resp, err := http.Post(goHostUrl+"/api/v1/go-links/delete", "application/json", bytes.NewBuffer(json))
+	if err != nil {
+		return err
 	}
-	secret.StringData = data
-	secret.ResourceVersion = ""
-	err1 := r.Create(ctx, secret)
-	if err1 != nil {
-		fmt.Println("[ERROR - handleCreate] failed to create secret", secret.Name)
-		fmt.Println(err1)
-		return fmt.Errorf("internal error - ERR_CODE=131")
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 && resp.StatusCode != 404 {
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to delete link bad status code %d , failed to read body - error: %s", resp.StatusCode, err)
+		}
+		return fmt.Errorf("failed to delete link bad status code %d , body is %s", resp.StatusCode, string(body))
 	}
 
-	err2 := handleUpdate(cr, secret)
-	if err2 != nil {
-		fmt.Println(err2)
-		return fmt.Errorf("internal error - ERR_CODE=137")
+	controllerutil.RemoveFinalizer(cr, cleanApiFinalizer)
+	err = r.Update(ctx, cr)
+
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func handleDelete(r client.Client, ctx context.Context, secret *corev1.Secret) error {
-	fmt.Println("[INFO - handleDelete] starting delete process for (secret)", secret.Name)
-	secretData, err := readSecret(secret)
-	if err != nil {
-		fmt.Println(err)
-		return fmt.Errorf("internal error - ERR_CODE=148")
-	}
-
-	body := map[string]string{"alias": secretData.Alias, "password": secretData.Password}
-	json, _ := json.Marshal(body)
-
-	res, err4 := http.Post(goHostUrl+"/api/v1/go-links/delete", "application/json", bytes.NewBuffer(json))
-
-	if err4 != nil {
-		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s\n", goHostUrl+"/api/v1/go-links/delete", secretData.Alias)
-		fmt.Println(err)
-		return fmt.Errorf("internal error - ERR_CODE=159")
-	} else if res.StatusCode/100 != 2 {
-		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s, response status %d\n", goHostUrl+"/api/v1/go-links/delete", secretData.Alias, res.StatusCode)
-		fmt.Println(err)
-		return fmt.Errorf("internal error - ERR_CODE=163")
-	}
-
-	err = r.Delete(ctx, secret)
-	if err != nil {
-		fmt.Println("[ERROR - handleDelete] failed to delete secret", secret.Name)
-		fmt.Println(err)
-		return fmt.Errorf("internal error - ERR_CODE=175")
-	}
-	fmt.Println("[INFO - handleDelete] success deleting (secret)", secret.Name)
-	return nil
-}
-
-func handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) error {
-	fmt.Printf("[INFO - handleUpdate] starting updating process for %s-%s\n", cr.Name, cr.Namespace)
-	sd, err := readSecret(secret)
-
-	if err != nil {
-		fmt.Println("[ERROR - handleUpdate] error reading secret " + secret.Name)
-		fmt.Println(err)
-		return fmt.Errorf("internal error - ERR_CODE=187")
-	}
-	body := map[string]string{
-		"alias":        sd.Alias,
+func PersistInGoAPI(ctx context.Context, cr *shmilav1.Go) error {
+	m := map[string]string{
+		"alias":        cr.Spec.Alias,
 		"url":          cr.Spec.Url,
-		"password":     sd.Password,
+		"password":     environment.GetVariables().Password,
 		"passwordHint": "managed by go-operator",
 	}
-	json, _ := json.Marshal(body)
-	res, err := http.Post(goHostUrl+"/api/v1/go-links", "application/json", bytes.NewBuffer(json))
-
+	json, _ := json.Marshal(m)
+	resp, err := http.Post(goHostUrl+"/api/v1/go-links", "application/json", bytes.NewBuffer(json))
 	if err != nil {
-		fmt.Println("[ERROR - handleUpdate] error in post " + goHostUrl)
-		fmt.Println(err)
-		return fmt.Errorf("internal error - ERR_CODE=196")
-	} else {
-		fmt.Println("[INFO - handleUpdate] success posting link ", sd.Alias)
+		return err
 	}
+	defer resp.Body.Close()
 
-	defer res.Body.Close()
-
-	if res.StatusCode/100 != 2 {
-		fmt.Printf("[ERROR - handleUpdate] bad status code for update request for link %s the status is: %d\n", sd.Alias, res.StatusCode)
-		b, err2 := ioutil.ReadAll(res.Body)
-		if err2 == nil {
-			fmt.Println(string(b))
+	if resp.StatusCode/100 != 2 {
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to persist link bad status code %d , failed to read body - error: %s", resp.StatusCode, err)
 		}
-		return fmt.Errorf("internal error - ERR_CODE=209")
+
+		return fmt.Errorf("failed to persist link, status code is %d, body is %s", resp.StatusCode, string(body))
 	}
 
 	return nil
-}
-
-func getSecretObject(resourceName, namespace, operatorNs string) corev1.Secret {
-	return corev1.Secret{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Secret",
-			APIVersion: "v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretPrefix + namespace + "-" + resourceName,
-			Namespace: operatorNs,
-		},
-	}
-}
-
-func readSecret(secret *corev1.Secret) (*secretData, error) {
-	if secret.StringData != nil {
-		return &secretData{
-			Alias:             secret.StringData["alias"],
-			Password:          secret.StringData["password"],
-			ResourceName:      secret.StringData["resourceName"],
-			ResourceNamespace: secret.StringData["resourceNamespace"],
-		}, nil
-	} else if secret.Data != nil {
-		return &secretData{
-			Alias:             string(secret.Data["alias"]),
-			Password:          string(secret.Data["password"]),
-			ResourceName:      string(secret.Data["resourceName"]),
-			ResourceNamespace: string(secret.Data["resourceNamespace"]),
-		}, nil
-	} else {
-		return nil, fmt.Errorf("both Data and StringData are nil in secret " + secret.Name)
-	}
-}
-
-func cleanupLoop(mgr ctrl.Manager, interval time.Duration) {
-	fmt.Println("[INFO - cleanupLoop] starting cleanup loop")
-	for {
-		cleanup(mgr)
-		time.Sleep(interval)
-	}
-}
-
-func cleanup(mgr ctrl.Manager) {
-	fmt.Println("[INFO - cleanup] starting cleanup process")
-	secrets := corev1.SecretList{}
-	if err := mgr.GetClient().List(
-		context.TODO(),
-		&secrets,
-		&client.ListOptions{Namespace: environment.GetVariables().ControllerNamespace},
-	); err != nil {
-		fmt.Println("[ERROR - cleanup] failed to list secrets")
-		fmt.Println(err)
-		return
-	}
-
-	for _, secret := range secrets.Items {
-		if strings.HasPrefix(secret.Name, secretPrefix) {
-			sd, err := readSecret(&secret)
-			if err != nil {
-				fmt.Println("[ERROR - cleanup] failed to read data from secret ", secret)
-				fmt.Println(err)
-			} else {
-				cr := shmilav1.Go{}
-				if err := mgr.GetClient().Get(
-					context.TODO(),
-					client.ObjectKey{
-						Name:      sd.ResourceName,
-						Namespace: sd.ResourceNamespace,
-					},
-					&cr); errors.IsNotFound(err) {
-					handleDelete(mgr.GetClient(), context.TODO(), &secret)
-				}
-			}
-		}
-	}
 }

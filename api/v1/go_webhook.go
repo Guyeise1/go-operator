@@ -19,8 +19,8 @@ package v1
 import (
 	"fmt"
 	"net/http"
-	"os"
 
+	"github.com/Guyeise1/go-operator/libs/environment"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -45,7 +45,7 @@ var _ webhook.Validator = &Go{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
 func (r *Go) ValidateCreate() error {
-	goHost := os.Getenv("GO_API_SERVER")
+	goHost := environment.GetVariables().GoApiURL
 	golog.Info("validate create", "name", r.Name)
 	res, err := http.Get(goHost + "/api/v1/go-links/" + r.Spec.Alias)
 
