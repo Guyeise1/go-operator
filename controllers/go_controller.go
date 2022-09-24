@@ -307,7 +307,7 @@ func cleanup(mgr ctrl.Manager) {
 
 const (
 	Failure string = "Failure"
-	Succees string = "Success"
+	Succees string = "Active"
 )
 
 func setStatus(cr *shmilav1.Go, message, state string) {

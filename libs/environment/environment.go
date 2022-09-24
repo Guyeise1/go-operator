@@ -57,8 +57,7 @@ func getenv(key, fallback string) string {
 func getenvOrDie(key string) string {
 	value := os.Getenv(key)
 	if len(value) == 0 {
-		fmt.Println("Environment variable " + key + "is not defined")
-		os.Exit(1)
+		panic("Environment variable " + key + "is not defined")
 	}
 	return value
 }
