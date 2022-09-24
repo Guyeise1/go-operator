@@ -11,6 +11,7 @@ type EnvironmentVariables struct {
 	ControllerNamespace  string
 	SecretPrefix         string
 	CleanIntervalSeconds int
+	RetryTimeSeconds     int
 }
 
 var variables *EnvironmentVariables = nil
@@ -22,6 +23,7 @@ func GetVariables() *EnvironmentVariables {
 			ControllerNamespace:  getenvOrDie("CONTROLLER_NAMESPACE"),
 			SecretPrefix:         getenv("SECRET_PREFIX", "go-"),
 			CleanIntervalSeconds: getenvInt("CLEAN_INTERVAL_SECONDS", 15*60),
+			RetryTimeSeconds:     getenvInt("RETRY_TIME_SECONDS", 30),
 		}
 	}
 	return variables

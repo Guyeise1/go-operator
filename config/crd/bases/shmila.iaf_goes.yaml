@@ -24,6 +24,9 @@ spec:
       jsonPath: .spec.url
       name: URL
       type: string
+    - jsonPath: .status.state
+      name: Status
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -64,6 +67,8 @@ spec:
             description: Status of your GoLink
             properties:
               message:
+                type: string
+              reconcileTime:
                 type: string
               state:
                 type: string

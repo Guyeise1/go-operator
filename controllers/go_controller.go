@@ -56,7 +56,7 @@ type secretData struct {
 var goHostUrl = environment.GetVariables().GoApiURL
 var secretPrefix = environment.GetVariables().SecretPrefix
 var complete = ctrl.Result{}
-var retry = ctrl.Result{RequeueAfter: 30 * time.Second}
+var retry = ctrl.Result{RequeueAfter: time.Duration(environment.GetVariables().RetryTimeSeconds) * time.Second}
 
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes/status,verbs=get;update;patch
@@ -79,10 +79,7 @@ func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 	crErr := r.Get(ctx, client.ObjectKey{Name: req.Name, Namespace: req.Namespace}, &cr)
 
-	cr.Status = shmilav1.GoStatus{
-		State:   "suceess",
-		Message: "go/" + cr.Spec.Alias + " -> " + cr.Spec.Url,
-	}
+	setStatus(&cr, "go/"+cr.Spec.Alias+" -> "+cr.Spec.Url, Succees)
 
 	defer r.Status().Update(ctx, &cr)
 
@@ -140,6 +137,7 @@ func (r *GoReconciler) handleCreate(ctx context.Context, cr *shmilav1.Go, secret
 	if err1 != nil {
 		fmt.Println("[ERROR - handleCreate] failed to create secret", secret.Name)
 		fmt.Println(err1)
+		setStatus(cr, "internal error - ERR_CODE=131", Failure)
 		return retry, fmt.Errorf("internal error - ERR_CODE=131")
 	}
 	return r.handleUpdate(cr, secret)
@@ -185,6 +183,7 @@ func (r *GoReconciler) handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) (ctr
 	if err != nil {
 		fmt.Println("[ERROR - handleUpdate] error reading secret " + secret.Name)
 		fmt.Println(err)
+		setStatus(cr, "internal error - ERR_CODE=187", Failure)
 		return retry, fmt.Errorf("internal error - ERR_CODE=187")
 	}
 	body := map[string]string{
@@ -199,6 +198,7 @@ func (r *GoReconciler) handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) (ctr
 	if err != nil {
 		fmt.Println("[ERROR - handleUpdate] error in post " + goHostUrl)
 		fmt.Println(err)
+		setStatus(cr, "internal error - go api is unavailable", Failure)
 		return retry, fmt.Errorf("internal error - ERR_CODE=196")
 	} else {
 		fmt.Println("[INFO - handleUpdate] success posting link ", sd.Alias)
@@ -208,10 +208,7 @@ func (r *GoReconciler) handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) (ctr
 
 	if res.StatusCode == 403 || res.StatusCode == 401 {
 		fmt.Println("[WARN - handleUpdate] link already exists")
-		cr.Status = shmilav1.GoStatus{
-			Message: "alias " + cr.Spec.Alias + " already taken",
-			State:   "error",
-		}
+		setStatus(cr, "alias "+cr.Spec.Alias+" already taken", Failure)
 		return retry, nil
 	}
 
@@ -221,6 +218,7 @@ func (r *GoReconciler) handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) (ctr
 		if err2 == nil {
 			fmt.Println(string(b))
 		}
+		setStatus(cr, "internal error - ERR_CODE=209", Failure)
 		return retry, fmt.Errorf("internal error - ERR_CODE=209")
 	}
 
@@ -300,5 +298,18 @@ func cleanup(mgr ctrl.Manager) {
 				}
 			}
 		}
+	}
+}
+
+const (
+	Failure string = "Failure"
+	Succees string = "Success"
+)
+
+func setStatus(cr *shmilav1.Go, message, state string) {
+	cr.Status = shmilav1.GoStatus{
+		Message:       message,
+		State:         state,
+		ReconcileTime: time.Now().Format(time.RFC3339),
 	}
 }
