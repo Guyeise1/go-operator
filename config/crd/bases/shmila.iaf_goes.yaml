@@ -31,7 +31,7 @@ spec:
       name: Age
       type: date
     - jsonPath: .status.message
-      name: Message
+      name: Details
       priority: 1
       type: string
     name: v1

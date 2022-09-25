@@ -38,7 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	shmilav1 "github.com/Guyeise1/go-operator/api/v1"
-	"github.com/Guyeise1/go-operator/libs/environment"
+	"github.com/Guyeise1/go-operator/internal/environment"
 )
 
 // GoReconciler reconciles a Go object
@@ -83,6 +83,11 @@ func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 	crErr := r.Get(ctx, client.ObjectKey{Name: req.Name, Namespace: req.Namespace}, &cr)
 
+	if cr.Status.State == "" {
+		setStatus(&cr, "", Pending)
+		r.Status().Update(ctx, &cr)
+	}
+
 	setStatus(&cr, "go/"+cr.Spec.Alias+" -> "+cr.Spec.Url, Succees)
 
 	defer r.Status().Update(ctx, &cr)
@@ -103,6 +108,11 @@ func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	if errors.IsNotFound(secErr) {
 		fmt.Println("[INFO - reconcile] secret " + secret.Name + " Not found, creating...")
 		return r.handleCreate(ctx, &cr, &secret)
+	} else if secErr != nil {
+		fmt.Println("[ERROR - reconcile] error reading secret")
+		fmt.Println(secErr)
+		setStatus(&cr, "internal error - ERR_CODE=109", Failure)
+		return retry, secErr
 	} else {
 		return r.handleUpdate(&cr, &secret)
 	}
@@ -202,7 +212,7 @@ func (r *GoReconciler) handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) (ctr
 	if err != nil {
 		fmt.Println("[ERROR - handleUpdate] error in post " + goHostUrl)
 		fmt.Println(err)
-		setStatus(cr, "internal error - go api is unavailable", Failure)
+		setStatus(cr, "go api unavailable right now", Pending)
 		return retry, fmt.Errorf("internal error - ERR_CODE=196")
 	} else {
 		fmt.Println("[INFO - handleUpdate] success posting link ", sd.Alias)
@@ -308,6 +318,7 @@ func cleanup(mgr ctrl.Manager) {
 const (
 	Failure string = "Failure"
 	Succees string = "Active"
+	Pending string = "Pending"
 )
 
 func setStatus(cr *shmilav1.Go, message, state string) {

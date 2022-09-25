@@ -27,8 +27,10 @@ spec:
         - name: GO_API_SERVER
           value: http://shmila.shmila.svc.cluster.local
         - name: CONTROLLER_NAMESPACE
-          value: shmila
-        image: guyeise5/go-operator:2.0.20
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        image: guyeise5/go-operator:2.0.23
         livenessProbe:
           httpGet:
             path: /healthz
