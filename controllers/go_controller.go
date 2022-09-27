@@ -207,7 +207,7 @@ func (r *GoReconciler) handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) (ctr
 	if err != nil {
 		fmt.Println("[ERROR - handleUpdate] error in post " + goHostUrl)
 		fmt.Println(err)
-		setStatus(cr, "go api unavailable right now", Pending)
+		setStatus(cr, "go api is unavailable right now", Pending)
 		return retry, fmt.Errorf("internal error - ERR_CODE=196")
 	} else {
 		fmt.Println("[INFO - handleUpdate] success posting link ", sd.Alias)
