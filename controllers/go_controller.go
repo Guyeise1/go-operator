@@ -25,8 +25,11 @@ import (
 	"io/ioutil"
 	"math/big"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+
+	"hash/fnv"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -235,16 +238,23 @@ func (r *GoReconciler) handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) (ctr
 }
 
 func getSecretObject(resourceName, namespace, operatorNs string) corev1.Secret {
+	mark := hash(namespace + "^&*(" + resourceName)
 	return corev1.Secret{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Secret",
 			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretPrefix + namespace + "-" + resourceName,
+			Name:      secretPrefix + namespace + "-" + resourceName + "-" + mark,
 			Namespace: operatorNs,
 		},
 	}
+}
+
+func hash(s string) string {
+	h := fnv.New32a()
+	h.Write([]byte(s))
+	return strconv.FormatInt(int64(h.Sum32())/1000, 10)
 }
 
 func readSecret(secret *corev1.Secret) (*secretData, error) {

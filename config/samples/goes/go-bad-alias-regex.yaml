@@ -1,0 +1,7 @@
+apiVersion: shmila.iaf/v1
+kind: Go
+metadata:
+  name: go-bad-regex
+spec:
+    alias: bad-Regex
+    url: http://chat/guy-3
