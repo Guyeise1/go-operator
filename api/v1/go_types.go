@@ -42,15 +42,21 @@ type GoSpec struct {
 
 // Status of your GoLink
 type GoStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// +kubebuilder:validation:Optional
+	Message string `json:"message"`
+	// +kubebuilder:validation:Optional
+	State string `json:"state"`
+	// +kubebuilder:validation:Optional
+	ReconcileTime string `json:"reconcileTime"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="Alias",type="string",JSONPath=".spec.alias",description="The shorten name"
 //+kubebuilder:printcolumn:name="URL",type="string",JSONPath=".spec.url",description="The URL"
-// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+//+kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.state"
+//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+//+kubebuilder:printcolumn:name="Details",type="string",priority=1,JSONPath=".status.message"
 
 // Go is the Schema for the goes API
 type Go struct {

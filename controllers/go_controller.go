@@ -25,8 +25,11 @@ import (
 	"io/ioutil"
 	"math/big"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+
+	"hash/fnv"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -35,9 +38,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	shmilav1 "github.com/Guyeise1/go-operator/api/v1"
-	"github.com/Guyeise1/go-operator/libs/environment"
+	"github.com/Guyeise1/go-operator/internal/environment"
 )
 
 // GoReconciler reconciles a Go object
@@ -54,6 +58,12 @@ type secretData struct {
 
 var goHostUrl = environment.GetVariables().GoApiURL
 var secretPrefix = environment.GetVariables().SecretPrefix
+var complete = ctrl.Result{}
+var retry = ctrl.Result{RequeueAfter: time.Duration(environment.GetVariables().RetryTimeSeconds) * time.Second}
+
+var httpClient = http.Client{
+	Timeout: time.Duration(environment.GetVariables().HttpRequestTimeoutSeconds) * time.Second,
+}
 
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=shmila.iaf,resources=goes/status,verbs=get;update;patch
@@ -73,7 +83,12 @@ func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 	result := ctrl.Result{}
 
 	cr := shmilav1.Go{}
+
 	crErr := r.Get(ctx, client.ObjectKey{Name: req.Name, Namespace: req.Namespace}, &cr)
+
+	setStatus(&cr, "go/"+cr.Spec.Alias+" -> "+cr.Spec.Url, Succees)
+
+	defer r.Status().Update(ctx, &cr)
 
 	fmt.Printf("[INFO - Reconcile] reconciling CR: %s-%s\n", cr.Namespace, cr.Name)
 
@@ -90,9 +105,14 @@ func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 	if errors.IsNotFound(secErr) {
 		fmt.Println("[INFO - reconcile] secret " + secret.Name + " Not found, creating...")
-		return result, handleCreate(r, ctx, &cr, &secret)
+		return r.handleCreate(ctx, &cr, &secret)
+	} else if secErr != nil {
+		fmt.Println("[ERROR - reconcile] error reading secret")
+		fmt.Println(secErr)
+		setStatus(&cr, "internal error - ERR_CODE=109", Failure)
+		return retry, secErr
 	} else {
-		return result, handleUpdate(&cr, &secret)
+		return r.handleUpdate(&cr, &secret)
 	}
 }
 
@@ -101,12 +121,13 @@ func (r *GoReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	go cleanupLoop(mgr, time.Duration(environment.GetVariables().CleanIntervalSeconds)*time.Second)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&shmilav1.Go{}).
+		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Complete(r)
 }
 
 func randomPassword() string {
 	letters := "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-	ret := make([]byte, 20)
+	ret := make([]byte, 50)
 	for i := 0; i < len(ret); i++ {
 		num, _ := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
 		ret[i] = letters[num.Int64()]
@@ -114,7 +135,7 @@ func randomPassword() string {
 	return string(ret)
 }
 
-func handleCreate(r *GoReconciler, ctx context.Context, cr *shmilav1.Go, secret *corev1.Secret) error {
+func (r *GoReconciler) handleCreate(ctx context.Context, cr *shmilav1.Go, secret *corev1.Secret) (ctrl.Result, error) {
 	fmt.Printf("[INFO - handleCreate] starting create process for CR: %s-%s\n", cr.Namespace, cr.Name)
 	data := map[string]string{
 		"alias":             cr.Spec.Alias,
@@ -128,16 +149,10 @@ func handleCreate(r *GoReconciler, ctx context.Context, cr *shmilav1.Go, secret 
 	if err1 != nil {
 		fmt.Println("[ERROR - handleCreate] failed to create secret", secret.Name)
 		fmt.Println(err1)
-		return fmt.Errorf("internal error - ERR_CODE=131")
+		setStatus(cr, "internal error - ERR_CODE=131", Failure)
+		return retry, fmt.Errorf("internal error - ERR_CODE=131")
 	}
-
-	err2 := handleUpdate(cr, secret)
-	if err2 != nil {
-		fmt.Println(err2)
-		return fmt.Errorf("internal error - ERR_CODE=137")
-	}
-
-	return nil
+	return r.handleUpdate(cr, secret)
 }
 
 func handleDelete(r client.Client, ctx context.Context, secret *corev1.Secret) error {
@@ -151,13 +166,13 @@ func handleDelete(r client.Client, ctx context.Context, secret *corev1.Secret) e
 	body := map[string]string{"alias": secretData.Alias, "password": secretData.Password}
 	json, _ := json.Marshal(body)
 
-	res, err4 := http.Post(goHostUrl+"/api/v1/go-links/delete", "application/json", bytes.NewBuffer(json))
+	res, err4 := httpClient.Post(goHostUrl+"/api/v1/go-links/delete", "application/json", bytes.NewBuffer(json))
 
 	if err4 != nil {
 		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s\n", goHostUrl+"/api/v1/go-links/delete", secretData.Alias)
 		fmt.Println(err)
 		return fmt.Errorf("internal error - ERR_CODE=159")
-	} else if res.StatusCode/100 != 2 {
+	} else if res.StatusCode/100 != 2 && res.StatusCode != 404 {
 		fmt.Printf("[ERROR - handleDelete] failed delete request (POST) %s, link: %s, response status %d\n", goHostUrl+"/api/v1/go-links/delete", secretData.Alias, res.StatusCode)
 		fmt.Println(err)
 		return fmt.Errorf("internal error - ERR_CODE=163")
@@ -173,14 +188,15 @@ func handleDelete(r client.Client, ctx context.Context, secret *corev1.Secret) e
 	return nil
 }
 
-func handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) error {
+func (r *GoReconciler) handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) (ctrl.Result, error) {
 	fmt.Printf("[INFO - handleUpdate] starting updating process for %s-%s\n", cr.Name, cr.Namespace)
 	sd, err := readSecret(secret)
 
 	if err != nil {
 		fmt.Println("[ERROR - handleUpdate] error reading secret " + secret.Name)
 		fmt.Println(err)
-		return fmt.Errorf("internal error - ERR_CODE=187")
+		setStatus(cr, "internal error - ERR_CODE=187", Failure)
+		return retry, fmt.Errorf("internal error - ERR_CODE=187")
 	}
 	body := map[string]string{
 		"alias":        sd.Alias,
@@ -189,17 +205,24 @@ func handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) error {
 		"passwordHint": "managed by go-operator",
 	}
 	json, _ := json.Marshal(body)
-	res, err := http.Post(goHostUrl+"/api/v1/go-links", "application/json", bytes.NewBuffer(json))
+	res, err := httpClient.Post(goHostUrl+"/api/v1/go-links", "application/json", bytes.NewBuffer(json))
 
 	if err != nil {
 		fmt.Println("[ERROR - handleUpdate] error in post " + goHostUrl)
 		fmt.Println(err)
-		return fmt.Errorf("internal error - ERR_CODE=196")
+		setStatus(cr, "go api is unavailable right now", Pending)
+		return retry, fmt.Errorf("internal error - ERR_CODE=196")
 	} else {
 		fmt.Println("[INFO - handleUpdate] success posting link ", sd.Alias)
 	}
 
 	defer res.Body.Close()
+
+	if res.StatusCode == 403 || res.StatusCode == 401 {
+		fmt.Println("[WARN - handleUpdate] link already exists")
+		setStatus(cr, "alias "+cr.Spec.Alias+" already taken", Failure)
+		return retry, nil
+	}
 
 	if res.StatusCode/100 != 2 {
 		fmt.Printf("[ERROR - handleUpdate] bad status code for update request for link %s the status is: %d\n", sd.Alias, res.StatusCode)
@@ -207,23 +230,31 @@ func handleUpdate(cr *shmilav1.Go, secret *corev1.Secret) error {
 		if err2 == nil {
 			fmt.Println(string(b))
 		}
-		return fmt.Errorf("internal error - ERR_CODE=209")
+		setStatus(cr, "internal error - ERR_CODE=209", Failure)
+		return retry, fmt.Errorf("internal error - ERR_CODE=209")
 	}
 
-	return nil
+	return complete, nil
 }
 
 func getSecretObject(resourceName, namespace, operatorNs string) corev1.Secret {
+	mark := hash(namespace + "^&*(" + resourceName)
 	return corev1.Secret{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Secret",
 			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretPrefix + namespace + "-" + resourceName,
+			Name:      secretPrefix + namespace + "-" + resourceName + "-" + mark,
 			Namespace: operatorNs,
 		},
 	}
+}
+
+func hash(s string) string {
+	h := fnv.New32a()
+	h.Write([]byte(s))
+	return strconv.FormatInt(int64(h.Sum32())/1000, 10)
 }
 
 func readSecret(secret *corev1.Secret) (*secretData, error) {
@@ -286,5 +317,19 @@ func cleanup(mgr ctrl.Manager) {
 				}
 			}
 		}
+	}
+}
+
+const (
+	Failure string = "Failure"
+	Succees string = "Active"
+	Pending string = "Pending"
+)
+
+func setStatus(cr *shmilav1.Go, message, state string) {
+	cr.Status = shmilav1.GoStatus{
+		Message:       message,
+		State:         state,
+		ReconcileTime: time.Now().Format(time.RFC3339),
 	}
 }

@@ -1,12 +1,21 @@
----
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
+    cert-manager.io/inject-ca-from: shmila/go-operator-serving-cert
     controller-gen.kubebuilder.io/version: v0.9.2
-  creationTimestamp: null
   name: goes.shmila.iaf
 spec:
+  conversion:
+    strategy: Webhook
+    webhook:
+      clientConfig:
+        service:
+          name: go-operator-webhook-service
+          namespace: shmila
+          path: /convert
+      conversionReviewVersions:
+      - v1
   group: shmila.iaf
   names:
     kind: Go

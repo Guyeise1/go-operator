@@ -1,0 +1,12 @@
+namespace=and-lnk
+namespace=and
+
+secret=go-{namespace}-guy-{go-name}-end
+
+
+
+alias: test
+go-and-lnk-lnk-test-end
+
+alias: lnk-test
+go-and-lnd-lnk-test-end

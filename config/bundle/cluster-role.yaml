@@ -1,0 +1,30 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  name: go-operator-manager-role
+rules:
+- apiGroups:
+  - shmila.iaf
+  resources:
+  - goes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - shmila.iaf
+  resources:
+  - goes/finalizers
+  verbs:
+  - update
+  - get
+  - patch
+- apiGroups:
+  - shmila.iaf
+  resources:
+  - goes/status
+  verbs:
+  - get
+  - patch
+  - update

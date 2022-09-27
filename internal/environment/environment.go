@@ -7,10 +7,12 @@ import (
 )
 
 type EnvironmentVariables struct {
-	GoApiURL             string
-	ControllerNamespace  string
-	SecretPrefix         string
-	CleanIntervalSeconds int
+	GoApiURL                  string
+	ControllerNamespace       string
+	SecretPrefix              string
+	CleanIntervalSeconds      int
+	RetryTimeSeconds          int
+	HttpRequestTimeoutSeconds int
 }
 
 var variables *EnvironmentVariables = nil
@@ -18,10 +20,12 @@ var variables *EnvironmentVariables = nil
 func GetVariables() *EnvironmentVariables {
 	if variables == nil {
 		variables = &EnvironmentVariables{
-			GoApiURL:             getenvOrDie("GO_API_SERVER"),
-			ControllerNamespace:  getenvOrDie("CONTROLLER_NAMESPACE"),
-			SecretPrefix:         getenv("SECRET_PREFIX", "go-"),
-			CleanIntervalSeconds: getenvInt("CLEAN_INTERVAL_SECONDS", 15*60),
+			GoApiURL:                  getenvOrDie("GO_API_SERVER"),
+			ControllerNamespace:       getenvOrDie("CONTROLLER_NAMESPACE"),
+			SecretPrefix:              getenv("SECRET_PREFIX", "go-"),
+			CleanIntervalSeconds:      getenvInt("CLEAN_INTERVAL_SECONDS", 15*60),
+			RetryTimeSeconds:          getenvInt("RETRY_TIME_SECONDS", 30),
+			HttpRequestTimeoutSeconds: getenvInt("HTTP_REQUEST_TIMEOUT_SECONDS", 3),
 		}
 	}
 	return variables
@@ -53,8 +57,7 @@ func getenv(key, fallback string) string {
 func getenvOrDie(key string) string {
 	value := os.Getenv(key)
 	if len(value) == 0 {
-		fmt.Println("Environment variable " + key + "is not defined")
-		os.Exit(1)
+		panic("Environment variable " + key + "is not defined")
 	}
 	return value
 }

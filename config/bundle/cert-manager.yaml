@@ -1,0 +1,21 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: go-operator-serving-cert
+  namespace: shmila
+spec:
+  dnsNames:
+  - go-operator-webhook-service.shmila.svc
+  - go-operator-webhook-service.shmila.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: go-operator-selfsigned-issuer
+  secretName: webhook-server-cert
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: go-operator-selfsigned-issuer
+  namespace: shmila
+spec:
+  selfSigned: {}
