@@ -83,11 +83,6 @@ func (r *GoReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 
 	crErr := r.Get(ctx, client.ObjectKey{Name: req.Name, Namespace: req.Namespace}, &cr)
 
-	if cr.Status.State == "" {
-		setStatus(&cr, "", Pending)
-		r.Status().Update(ctx, &cr)
-	}
-
 	setStatus(&cr, "go/"+cr.Spec.Alias+" -> "+cr.Spec.Url, Succees)
 
 	defer r.Status().Update(ctx, &cr)
